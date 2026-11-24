@@ -6,10 +6,21 @@
     if(response.status===404){status.textContent='Aguardando a primeira publicação de dados.';return;}
     if(!response.ok)throw Error();
     const snapshot=await response.json();
-    if(snapshot.version!==1||!Array.isArray(snapshot.rows))throw Error();
+    if(snapshot.version!==3){
+      status.textContent='Gere um novo dados.json pela cópia local deste pacote.';
+      return;
+    }
+    if(![snapshot.rows,snapshot.times,snapshot.events].every(Array.isArray))throw Error();
+    const ids=new Set([...snapshot.rows,...snapshot.times,...snapshot.events].map(row=>row.agent).filter(Boolean));
+    agentDirectory=new Map([...ids].map(id=>[id,'Operador '+id]));
+    occupancyRows=snapshot.times;
+    occupancyEvents=snapshot.events;
     applied=true;
     setAnalysis({output:snapshot.rows});
-    status.textContent='Dados publicados em '+new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Sao_Paulo'}).format(new Date(snapshot.updatedAt));
+    renderOccupancy();
+    renderPauses();
+    el('occStatus').hidden=true;
+    status.textContent='Dados publicados em '+new Intl.DateTimeFormat('pt-BR',{dateStyle:'short',timeStyle:'short',timeZone:'America/Sao_Paulo'}).format(new Date(snapshot.updatedAt))+'. Os identificadores dos operadores são anônimos nesta publicação.';
   }catch{
     status.textContent='Não foi possível carregar os dados publicados.';
   }

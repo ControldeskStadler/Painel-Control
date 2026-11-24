@@ -51,6 +51,8 @@ function show(page) {
     button.classList.toggle('active', button.dataset.page === page);
     if (button.dataset.page === page) button.setAttribute('aria-current','page'); else button.removeAttribute('aria-current');
   }
+  if(page==='occupancy')renderOccupancy();
+  if(page==='pauses')renderPauses();
   window.scrollTo(0,0);
 }
 function parseCSV(text, selectRecords) {
@@ -221,8 +223,8 @@ function renderOperatorRanking(data) {
     if(!row.agent||row.agent==='0')continue;
     if(!operators.has(row.agent))operators.set(row.agent,{attended:0,deal:0,attendanceData:false,tabData:false});
     const totals=operators.get(row.agent);
-    totals.attended+=Number(Boolean(row.attended));
-    totals.deal+=Number(Boolean(row.deal));
+    totals.attended+=row.attended?row.count:0;
+    totals.deal+=row.deal?row.count:0;
     totals.attendanceData||=row.attendanceData;
     totals.tabData||=row.tabData;
   }
@@ -233,7 +235,7 @@ function renderOperatorRanking(data) {
   const empty=metric==='deal'?'Nenhum acordo atribuído a operadores neste recorte.':'Nenhuma atendida atribuída a operadores neste recorte.';
   el('operatorRanking').innerHTML=ranking.length?'<table><thead><tr><th>Operador</th><th>Atendidas</th><th>Acordos</th></tr></thead><tbody>'+
     ranking.map(([id,a],i)=>'<tr><td>'+(i+1)+'. '+html(name(id))+'</td><td>'+num(a.attendanceData?a.attended:null)+'</td><td>'+num(a.tabData?a.deal:null)+'</td></tr>').join('')+
-    '</tbody></table>':'<p>'+(!applied?'Importe o ZIP do OLOS para ver o ranking.':empty)+'</p>';
+    '</tbody></table>':'<p>'+(!applied?'Aguardando os dados publicados.':empty)+'</p>';
 }
 function overview() {
   const group=el('group').value,campaign=el('campaign').value,hour=el('overviewHour').value;
@@ -247,7 +249,7 @@ function overview() {
   }
   if(!data.length&&applied&&!invalidRange&&!messages.length)messages.push('Nenhuma tentativa corresponde aos filtros selecionados.');
   el('dateFeedback').textContent=messages.join(' ');
-
+  renderOperatorRanking(data);
   const a=aggregate(data);
   const mode=el('chartMetric').value;
   el('stats').innerHTML=metricKeys.map(k=>'<button type="button" class="stat" data-metric="'+k+
@@ -272,7 +274,7 @@ function overview() {
     if(!selectableHours.has(h))return '<div class="bar">'+bar+'</div>';
     return '<button type="button" class="bar chart-hour" data-hour="'+h+'" aria-pressed="'+(hour===h)+
       '" aria-label="'+hourLabel+' · '+labels[mode]+' · '+label+'">'+bar+'</button>';
-  }).join(''):'<div class="empty">'+(applied?'Sem dados para o indicador selecionado.':'Aguardando a primeira publicação de dados.')+'</div>';
+  }).join(''):'<div class="empty">'+(applied?'Sem dados para o indicador selecionado.':'Aguardando os dados publicados.')+'</div>';
   for(const bar of el('chart').querySelectorAll('button'))bar.onclick=()=>{
     el('overviewHour').value=hour===bar.dataset.hour?'':bar.dataset.hour;
     overview();
@@ -280,77 +282,10 @@ function overview() {
   };
 
 }
-function postDays() {
-  const change=el('change').value;
-  if(!change)return [];
-  const exclusions=new Set(el('exclude').value.split(/[,;\s]+/).filter(Boolean));
-  if([...exclusions].some(day=>!isoDate(day)))throw Error('Informe as exclusões no formato AAAA-MM-DD.');
-  const days=[];
-  const d=new Date(change+'T00:00:00Z');
-  while(days.length<5){
-    d.setUTCDate(d.getUTCDate()+1);
-    const date=d.toISOString().slice(0,10);
-    if(d.getUTCDay()!==0&&d.getUTCDay()!==6&&!exclusions.has(date))days.push(date);
-  }
-  return days;
-}
-function test() {
-  let post=[], dateError='';
-  try{post=postDays();}catch(error){dateError=error.message;}
-  const choose=r=>el('scope').value==='all'||r.window===priority[r.campaign];
-  const coverage=[], comparisons=[], remarks=[], rates=[];
-  for(const [campaign,windowName] of Object.entries(priority)){
-    const name=campaignNames[campaign]+' · '+(el('scope').value==='all'?'dia inteiro':windowName);
-    const data=rows.filter(r=>r.campaign===campaign&&choose(r));
-    const before=data.filter(r=>baseline.includes(r.day));
-    const after=data.filter(r=>post.includes(r.day));
-    const missingBefore=baseline.filter(d=>!before.some(r=>r.day===d));
-    const missingAfter=post.filter(d=>!after.some(r=>r.day===d));
-    const a=aggregate(before), b=aggregate(after);
-    const tabMissingBefore=baseline.filter(day=>before.some(r=>r.day===day)&&!before.some(r=>r.day===day&&r.tabData));
-    const tabMissingAfter=post.filter(day=>after.some(r=>r.day===day)&&!after.some(r=>r.day===day&&r.tabData));
-    for(const [phase,items,totals] of [['Referência',before,a],['Teste',after,b]]){
-      const dates=new Set(items.map(r=>r.day));
-      rates.push([name+' · '+phase,num(dates.size),num(totals.n),
-        num(totals.attended),num(totals.cpc),pct(totals.cpc,totals.n)]);
-    }
-    const partial=Boolean(missingBefore.length||missingAfter.length||post.length!==5);
-    const issues=[
-      missingBefore.length?'Referência sem tentativas em '+missingBefore.map(br).join(', '):'',
-      missingAfter.length?'Teste sem tentativas em '+missingAfter.map(br).join(', '):'',
-      tabMissingBefore.length||tabMissingAfter.length?'Sem tabulações em '+[...new Set([...tabMissingBefore,...tabMissingAfter])].map(br).join(', '):''
-    ].filter(Boolean);
-    coverage.push(campaignNames[campaign]+' · Referência '+(3-missingBefore.length)+'/3 · Teste '+(post.length-missingAfter.length)+'/5'+(issues.length?' · '+issues.join(' · '):''));
-    comparisons.push([name+' · Referência',a],[name+' · Teste',b]);
-    if(partial||a.cpc==null||b.cpc==null||tabMissingBefore.length||tabMissingAfter.length){
-      remarks.push('<p><strong>'+name+'</strong> · Evidência insuficiente para concluir a produtividade. É preciso ter tentativas e tabulações nos períodos completos.</p>');
-      continue;
-    }
-    const oldRate=a.cpc/a.n, newRate=b.cpc/b.n;
-    const incremental=b.cpc-b.n*oldRate;
-    const delta=(newRate-oldRate)*100;
-    const volumes=(b.n/5)/(a.n/3)-1;
-    const sign=value=>value>0?'+'+num(value):num(value);
-    remarks.push('<p><strong>'+name+'</strong> · '+pct(a.cpc,a.n)+' → '+pct(b.cpc,b.n)+' de CPC ('+sign(delta)+' p.p.). CPC incremental estimado: '+sign(incremental)+'. Volume diário: '+sign(100*volumes)+'%. A taxa observada '+(delta>0?'aumentou':delta<0?'caiu':'ficou estável')+'.</p>');
-    if(a.cpc<30||b.cpc<30)remarks.push('<p>'+campaignNames[campaign]+' · Menos de 30 CPC em pelo menos um período. A estimativa pode variar bastante com poucos contatos.</p>');
-  }
-  el('coverage').innerHTML='<div class="notice">'+(dateError?html(dateError):post.length?'Datas do teste · '+post.map(br).join(', '):'Informe a data da mudança para calcular o período do teste.')+(rows.length?'<br>'+coverage.join('<br>'):'')+'</div>';
-  el('testMissing').textContent=rows.length?'':'Aguardando a primeira publicação de dados.';
-  const rateHead=['Campanha e período','Dias com dados','Tentativas','Atendidas','CPC','Taxa de CPC'];
-  el('testRates').innerHTML=rows.length?'<table><thead><tr>'+rateHead.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+
-    rates.map(row=>'<tr>'+row.map(cell=>'<td>'+html(cell)+'</td>').join('')+'</tr>').join('')+'</tbody></table>':'';
-  el('comparison').innerHTML=rows.length?table('Período',comparisons):'<p>Aguardando os dados publicados.</p>';
-  el('conclusion').innerHTML=remarks.join('')+
-    '<p>CPC incremental = CPC do teste menos o CPC esperado se o volume do teste tivesse a taxa da referência. A comparação é descritiva. Alterações de mailing, capacidade, volume e regras podem influenciar a taxa. A cobertura indica dias com registros no recorte. Confira a integridade dos exports e informe as datas incompletas.</p>';
-}
-function render(){overview();test();}
-function fillRules(rules){
-  el('criteria').innerHTML=Object.keys(names).map(k=>'<label>'+names[k]+'<input id="rule-'+k+'" value="'+html(rules[k])+'"></label>').join('');
-}
+function render(){overview();}
 for(const b of document.querySelectorAll('[data-page]')) b.onclick=()=>show(b.dataset.page);
 el('chartMetric').innerHTML=metricKeys.map(k=>'<option value="'+k+'">'+labels[k]+'</option>').join('');
-for(const id of ['campaign','from','to','overviewHour','group','chartMetric'])el(id).onchange=overview;
+for(const id of ['campaign','from','to','overviewHour','group','chartMetric','rankMetric'])el(id).onchange=overview;
 for(const id of ['from','to'])el(id).oninput=overview;
 el('reset').onclick=()=>{for(const id of ['campaign','from','to','overviewHour'])el(id).value='';overview();};
-for(const id of ['change','exclude','scope'])el(id).onchange=test;
 render();
