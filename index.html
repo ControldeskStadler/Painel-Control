@@ -258,6 +258,9 @@ function setAnalysis(result) {
 }
 const cobData={events:new Map(),deals:new Map(),detail:{}};
 const cobLabels={cpc:'CPC',cpca:'CPC_A',deal:'Acordo',cpcRate:'Taxa de CPC'};
+function cobOperator(value){
+  return String(value??'').trim().split(/\r?\n|\s+(?=Aberto\s*\(\d+\)\s*:)/i,1)[0].trim();
+}
 function cobRows(){
   const result=[];
   for(const kind of ['events','deals']){
@@ -345,7 +348,7 @@ function overview() {
   if(el('rankMetric').value==='attended')renderOperatorRanking(data);
   else {
     const k=el('rankMetric').value;
-    const ranking=groupBy(facts.filter(r=>r[k]>0),r=>r.operator||'Sem operador')
+    const ranking=groupBy(facts.filter(r=>r[k]>0),r=>cobOperator(r.operator)||'Sem operador')
       .map(([name,items])=>[name,cobTotals(items)[k]]).sort((a,b)=>b[1]-a[1]);
     el('operatorRanking').innerHTML=ranking.length?'<table><thead><tr><th>Operador</th><th>'+labels[k]+'</th></tr></thead><tbody>'+
       ranking.map(([name,value])=>'<tr><td>'+html(name)+'</td><td>'+num(value)+'</td></tr>').join('')+'</tbody></table>':'<p>Sem registros no recorte.</p>';
