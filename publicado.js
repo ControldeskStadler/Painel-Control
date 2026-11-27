@@ -17,6 +17,7 @@
     occupancyRows=snapshot.times;
     occupancyEvents=snapshot.events;
     applied=true;
+    if(snapshot.cobmais)cobmaisTotals=snapshot.cobmais;
     setAnalysis({output:snapshot.rows});
     renderOccupancy();
     renderPauses();

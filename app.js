@@ -190,16 +190,16 @@ function setAnalysis(result) {
 const labels={n:'Tentativas',hello:'Alô',helloRate:'Taxa de alô',attended:'Atendida',cpc:'CPC',cpcRate:'Taxa de CPC',deal:'Acordos',no:'Não atende',box:'Caixa postal',hang:'Atende e desliga',drop:'Derrubadas',exceeded:'Tabulações excedidas'};
 const metricKeys=Object.keys(labels);
 function aggregate(data) {
-  const values={n:data.reduce((sum,row)=>sum+row.count,0)};
-  for(const k of ['hello','attended','cpc','deal','no','box','hang','drop','exceeded']) values[k]=data.reduce((sum,row)=>sum+(row[k]?row.count:0),0);
-  if(!data.some(r=>r.tabData)){values.cpc=null;values.deal=null;values.exceeded=null;}
+  const values={n:data.reduce((sum,row)=>sum+(row.count??0),0)};
+  for(const k of ['hello','attended','cpc','deal','no','box','hang','drop','exceeded']) values[k]=data.reduce((sum,row)=>sum+(row[k]?(row.count??1):0),0);
+  if(!data.some(r=>r.tabData)){if(!values.cpc)values.cpc=null;if(!values.deal)values.deal=null;values.exceeded=null;}
   if(!data.some(r=>r.attendanceData))values.attended=null;
   if(!data.some(r=>r.outcomeData)){values.hello=null;values.hang=null;values.no=null;}
   if(!data.some(r=>r.telData)){
     if(!values.box)values.box=null;
     if(!values.drop)values.drop=null;
   }
-  if(!data.length)values.n=null;
+  if(!values.n)values.n=null;
   return values;
 }
 function display(a,k) {
@@ -220,15 +220,17 @@ function renderOperatorRanking(data) {
   const metric=el('rankMetric').value==='deal'?'deal':'attended';
   const operators=new Map();
   for(const row of data){
-    if(!row.agent||row.agent==='0')continue;
-    if(!operators.has(row.agent))operators.set(row.agent,{attended:0,deal:0,attendanceData:false,tabData:false});
-    const totals=operators.get(row.agent);
-    totals.attended+=row.attended?row.count:0;
-    totals.deal+=row.deal?row.count:0;
+    const name=row.outcomeOnly?(row.operator??'Sem atribuição'):(row.agent&&row.agent!=='0'
+      ?agentDirectory.get(row.agent)??'Nome não cadastrado':null);
+    if(!name)continue;
+    if(!operators.has(name))operators.set(name,{attended:0,deal:0,attendanceData:false,tabData:false});
+    const totals=operators.get(name);
+    totals.attended+=row.attended?(row.count??1):0;
+    totals.deal+=row.deal?(row.count??1):0;
     totals.attendanceData||=row.attendanceData;
-    totals.tabData||=row.tabData;
+    totals.tabData||=row.tabData||row.deal;
   }
-  const name=id=>typeof agentDirectory==='undefined'?'Operador '+id:agentDirectory.get(id)||'Operador '+id;
+  const name=id=>id;
   const ranking=[...operators].filter(([,a])=>a[metric]>0)
     .sort(([id,a],[other,b])=>b[metric]-a[metric]||name(id).localeCompare(name(other),'pt-BR',{sensitivity:'base'}))
     .slice(0,5);
@@ -241,7 +243,7 @@ function overview() {
   const group=el('group').value,campaign=el('campaign').value,hour=el('overviewHour').value;
   const from=el('from').value,to=el('to').value;
   const invalidRange=Boolean(from&&to&&from>to);
-  const data=invalidRange?[]:rows.filter(r=>(!campaign||r.campaign===campaign)&&(!from||r.day>=from)&&(!to||r.day<=to)&&(hour===''||r.hour===Number(hour)));
+  const data=invalidRange?[]:(typeof overviewRows==='function'?overviewRows():rows).filter(r=>(!campaign||r.campaign===campaign)&&(!from||r.day>=from)&&(!to||r.day<=to)&&(hour===''||r.hour===Number(hour)));
   const messages=[];
   if(invalidRange)messages.push('A data inicial deve ser anterior ou igual à data final.');
   else if(from||to){
@@ -259,9 +261,9 @@ function overview() {
     overview();
     el('stats').querySelector('[data-metric="'+card.dataset.metric+'"]').focus();
   };
-  const groups=groupBy(data,r=>[campaignNames[r.campaign],group==='day'?r.day:group==='hour'?r.hour+'h':group==='window'?r.window:group==='detail'?r.day+' '+r.hour+'h':''].filter(Boolean).join(' · '));
+  const groups=groupBy(data,r=>[campaignNames[r.campaign]??'Sem campanha identificada',group==='day'?r.day:group==='hour'?(r.hour==null?'Sem hora':r.hour+'h'):group==='window'?r.window:group==='detail'?r.day+' '+(r.hour==null?'Sem hora':r.hour+'h'):''].filter(Boolean).join(' · '));
   el('detail').innerHTML=table('Campanha',groups.map(([label,items])=>[label.replace(/\d{4}-\d{2}-\d{2}/g,br),aggregate(items)]));
-  const points=groupBy(data,r=>String(r.hour)).map(([h,items])=>{
+  const points=groupBy(data,r=>r.hour==null?'Sem hora':String(r.hour)).map(([h,items])=>{
     const metrics=aggregate(items);
     const value=mode.endsWith('Rate')?(metrics[mode.slice(0,-4)] ?? 0)/metrics.n:metrics[mode];
     return {h,value,label:display(metrics,mode)};
@@ -269,7 +271,7 @@ function overview() {
   const max=Math.max(1e-9,...points.map(({value})=>value??0));
   const selectableHours=new Set(Array.from(el('overviewHour').options,option=>option.value));
   el('chart').innerHTML=points.some(({label})=>label!=='—')?points.map(({h,value,label})=>{
-    const hourLabel=String(h).padStart(2,'0')+'h';
+    const hourLabel=h==='Sem hora'?h:String(h).padStart(2,'0')+'h';
     const bar='<strong class="bar-value">'+label+'</strong><i aria-hidden="true" style="height:'+((value??0)/max*94)+'px"></i><span>'+hourLabel+'</span>';
     if(!selectableHours.has(h))return '<div class="bar">'+bar+'</div>';
     return '<button type="button" class="bar chart-hour" data-hour="'+h+'" aria-pressed="'+(hour===h)+
