@@ -256,10 +256,15 @@ function setAnalysis(result) {
   rows=result.output;
   render();
 }
-const cobData={events:new Map(),deals:new Map(),detail:{}};
+const cobData={events:new Map(),deals:new Map(),detail:{},operatorNames:new Map()};
 const cobLabels={cpc:'CPC',cpca:'CPC_A',deal:'Acordo',cpcRate:'Taxa de CPC'};
 function cobOperator(value){
   return String(value??'').trim().split(/\r?\n|\s+(?=Aberto\s*\(\d+\)\s*:)/i,1)[0].trim();
+}
+function cobOperatorName(value){
+  const login=cobOperator(value);
+  const mapped=cobData.operatorNames.get(login)||(typeof agentDirectory!=='undefined'?agentDirectory.get(login):'');
+  return mapped||login||'Sem operador';
 }
 function cobRows(){
   const result=[];
@@ -349,7 +354,8 @@ function overview() {
   else {
     const k=el('rankMetric').value;
     const ranking=groupBy(facts.filter(r=>r[k]>0),r=>cobOperator(r.operator)||'Sem operador')
-      .map(([name,items])=>[name,cobTotals(items)[k]]).sort((a,b)=>b[1]-a[1]);
+      .map(([login,items])=>[cobOperatorName(login),cobTotals(items)[k]])
+      .sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],'pt-BR',{sensitivity:'base'})).slice(0,5);
     el('operatorRanking').innerHTML=ranking.length?'<table><thead><tr><th>Operador</th><th>'+labels[k]+'</th></tr></thead><tbody>'+
       ranking.map(([name,value])=>'<tr><td>'+html(name)+'</td><td>'+num(value)+'</td></tr>').join('')+'</tbody></table>':'<p>Sem registros no recorte.</p>';
   }
@@ -774,6 +780,7 @@ renderPauses();
     cobData.detail=snapshot.cobmais?.detail??{};
     cobData.events=new Map(snapshot.cobmais?.events ?? []);
     cobData.deals=new Map(snapshot.cobmais?.deals ?? []);
+    cobData.operatorNames=new Map(snapshot.cobmais?.operatorNames ?? []);
     setAnalysis({output:snapshot.rows});
     renderOccupancy();
     renderPauses();
